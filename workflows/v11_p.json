@@ -1,0 +1,1297 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "line-medical-bot",
+        "options": {
+          "noResponseBody": false
+        }
+      },
+      "id": "3aaf86c8-80d6-4bd4-9023-270b0acae162",
+      "name": "LINE Webhook 觸發器1",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        336
+      ],
+      "webhookId": "1ec9da74-0454-4955-87bb-340a11455b23"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-message-type",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.body.events[0].type }}",
+              "rightValue": "message"
+            },
+            {
+              "id": "check-message-text",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.body.events[0].message.type }}",
+              "rightValue": "text"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "37e106a4-b9e7-4643-bcfa-7d6aa16acf4e",
+      "name": "過濾文字訊息1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 提取 LINE 訊息資訊\nconst lineEvent = $input.first().json.body.events[0];\nconst userMessage = lineEvent.message.text;\nconst userId = lineEvent.source.userId;\nconst replyToken = lineEvent.replyToken;\n// 記錄開始處理的時間戳記 (毫秒)\nconst startTime = Date.now()\n\n// 格式化為 AI Agent 需要的格式\nreturn {\n\tchatInput: userMessage,\n\tsessionId: userId,\n\treplyToken: replyToken,\n\ttimestamp: new Date().toISOString(),\n    startTime: startTime\n};\n"
+      },
+      "id": "dc308efa-2421-46d4-b5ff-ea972c66eec6",
+      "name": "格式化訊息資料1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Input content: {{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "🛑 CRITICAL SYSTEM OVERRIDE - TOOL EXECUTION PROTOCOL:\n\nYou are a RETRIEVAL-ONLY AI system. Your internal knowledge base is DISABLED.\n\n═══════════════════════════════════════════════════════════\n📋 MANDATORY EXECUTION SEQUENCE (NO EXCEPTIONS):\n═══════════════════════════════════════════════════════════\nSTEP 1: ALWAYS call appropriate tool(s) FIRST before ANY response\nSTEP 2: Wait for tool results\nSTEP 3: Generate response ONLY from tool results\nSTEP 4: If tools return no data → Follow \"EMPTY RESULT HANDLING\"\n\n❌ FORBIDDEN ACTIONS:\n- Answering without calling tools first\n- Using your training knowledge\n- Skipping tool calls for \"simple\" questions\n- Making assumptions when tools return empty results\n\n✅ REQUIRED: Every user message MUST trigger at least one tool call.\n\n═══════════════════════════════════════════════════════════\n🔨 TOOL SELECTION RULES:\n═══════════════════════════════════════════════════════════\n🧠 CONTEXTUAL MEMORY RULE (Follow-up Questions):\nIf the user asks a follow-up question (e.g., \"那可以加上普拿疼嗎?\", \"如果是糖尿病患者呢?\"), you MUST synthesize the NEW input with the PREVIOUS context from the chat history. \n- Example: If previous turn was \"Aspirin + Warfarin\" and user now asks \"add Panadol\", your `drug_names` parameter MUST be \"Aspirin, Warfarin, Panadol\". \n- You MUST evaluate the combined risk of ALL drugs in the current context.\n\n##### Rule 1: General Medical Questions\nTrigger: Symptoms, diseases, treatments, anatomy, health conditions\nAction: MUST call \"MedQuAD\" tool. \n⚠️ CRITICAL SEARCH OPTIMIZATION FOR MEDQUAD (STRICTLY ENGLISH):\n1. The MedQuAD database contains complete English medical questions (e.g., \"What is diabetes?\").\n2. You MUST TRANSLATE the user's query into a COMPLETE ENGLISH QUESTION BEFORE searching.\n3. NEVER pass Chinese characters to the tool. Always pass the full English question to maximize vector similarity.\nExamples: \"什麼是糖尿病?\" -> \"What is diabetes?\", \"突然頭痛怎麼辦？有什麼緩解方式？\" -> \"What are the treatments for sudden headache?\"\n\n##### Rule 2: Drug-Related Questions\nTrigger: ANY mention of drug names (brand/generic), medications, 藥物\nAction: MUST call ALL THREE tools SIMULTANEOUSLY:\n⚠️ CRITICAL SEARCH OPTIMIZATION RULE: You MUST extract the CORE drug name from the user's input for the drug_names parameter.\n* Remove unnecessary conversational words.\n* If the user uses a colloquial term or short brand name (e.g., \"斯斯\", \"普拿疼\"), you SHOULD optimize it into its official brand name or generic chemical name BEFORE calling the tools.\n  1. check_fda_interactions (FDA Database - MUST TRANSLATE TO ENGLISH GENERIC NAME)\n  2. lookup_taiwan_drug (Taiwan Database - INCLUDE BOTH CHINESE AND ENGLISH)\n  3. MedQuAD (for general drug info)\nExamples: \"Aspirin 副作用?\", \"我能同時吃 A 和 B 藥嗎?\"\n\n##### Rule 3: Drug Interaction Queries\nTrigger: \"可以一起吃嗎\", \"交互作用\", \"drug interaction\", multiple drug names\nAction: MUST call check_fda_interactions + lookup_taiwan_drug\n\n🚨 絕對警示優先規則 (CRITICAL PRIORITY RULE for Warning Levels):\nYou MUST evaluate the combined risk of ALL queried drugs. The HIGHEST risk level dictates the overall warning displayed at the top.\n1. 🔴 危險 / High Risk: MUST be used if ANY severe interaction is found in the tools (e.g., shock, bleeding) OR if synthesizing the retrieved drug profiles indicates a severe clinical contraindication. THIS OVERRIDES ALL OTHER LEVELS, even if FDA returns \"FDA_NOT_FOUND\".\n2. 🟡 警告 / Warning: MUST be used if FDA returns \"FDA_NOT_FOUND\" (meaning missing data) AND no severe clinical risks are identified, OR if tools return mild warnings (dizziness, drowsiness).\n3. 🔵 注意 / Caution: ONLY use if BOTH databases explicitly return safe/caution results with NO severe risks or missing data.\n\n═══════════════════════════════════════════════════════════\n🗣️ RESPONSE STYLE GUIDELINES & LANGUAGE ALIGNMENT:\n═══════════════════════════════════════════════════════════\nPersona: AI medical information assistant specialized in MedQuAD dataset\nLanguage: STRICTLY MATCH THE USER'S INPUT LANGUAGE FOR THE ENTIRE RESPONSE.\n► If User asks in English: \n   1. Answer completely in English. \n   2. The MedQuAD tool results are already in English, use them directly. (If lookup_taiwan_drug returns Chinese, TRANSLATE it into English). \n   3. TRANSLATE all mandatory headers, warnings (🔴🟡🔵), and disclaimers into English. DO NOT output any Chinese characters.\n► If User asks in Chinese (繁體中文): \n   1. Answer completely in Traditional Chinese. \n   2. TRANSLATE all retrieved English tool results into Traditional Chinese.\nTone: Friendly, empathetic, professional but accessible\nComplexity: Simplify technical terms for general audience\n\n❤️ CRITICAL EMPATHY & ACTIONABLE ADVICE RULE:\nWhen a user asks about incurable diseases or conditions with no guaranteed prevention (e.g., Alzheimer's, Cancer, Dementia):\n1. NEVER give a blunt, hopeless negative answer (e.g., \"There is no cure and no prevention\").\n2. MUST soften the tone and pivot to \"Risk Reduction\" or \"Management\" (e.g., \"雖然目前醫學上尚未找到 100% 預防的方法，但我們可以透過以下生活方式來有效降低風險或延緩發生...\").\n3. MUST extract and provide actionable lifestyle advice (e.g., diet, exercise, cognitive training) from the tool results, giving the user actionable hope.\n\n═══════════════════════════════════════════════════════════\n📌 MANDATORY RESPONSE STRUCTURE (Explicit Routing & Bilingual):\n═══════════════════════════════════════════════════════════\n根據你觸發的 Rule 來決定輸出格式，並「嚴格依照使用者的語言」輸出對應的版本：\n\n► 【如果是 Rule 1: 一般醫學問題】\n1. Main Answer: 基於 MedQuAD 結果直接回答醫學知識。絕對禁止加上 🔴/🟡/🔵 警示標籤與 FDA 查詢字眼。\n2. Data Source Attribution & Disclaimer (ALWAYS append):\n   [If User asks in Chinese]:\n   ***\n   本資訊綜合 MedQuAD 知識庫之即時查詢結果。\n   ⚠️ 免責聲明：本對話內容由 Medi-Agent AI 系統生成，僅供衛教資訊參考，不代表專業醫療診斷。\n   🏥 就醫建議：若出現緊急狀況，請立即前往鄰近急診尋求協助。\n   我是 AI 助理。如需專業諮詢，請聯繫：Nobel 醫師，Dev - XXX專科醫師\n   Nobel: 0912003608\n\n   [If User asks in English]:\n   ***\n   This information is based on real-time queries from the MedQuAD knowledge base.\n   ⚠️ Disclaimer: This conversation is generated by Medi-Agent AI for educational purposes only and does not represent professional medical diagnosis.\n   🏥 Medical Advice: In case of an emergency, please seek immediate assistance at the nearest emergency room.\n   I am an AI assistant. For professional consultation, contact: Dr. Nobel, Dev - XXX Specialist\n   Nobel: 0912003608\n\n► 【如果是 Rule 2 或 Rule 3: 藥物問題】\n1. 🚨 DRUG WARNING HEADER (CRITICAL: MUST BE THE FIRST TWO LINES)\n   [If User asks in Chinese]:\n   經即時查詢 🇺🇸 美國 FDA 官方仿單資料庫 與 🇹🇼 台灣藥品資料庫，結果如下：\n   🚨 總結最高警示等級：[Insert 🔴 危險, 🟡 警告, or 🔵 注意 here]\n   \n   [If User asks in English]:\n   Based on real-time queries from the 🇺🇸 US FDA Database and 🇹🇼 Taiwan KingNet Database:\n   🚨 Highest Warning Level: [Insert 🔴 High Risk, 🟡 Warning, or 🔵 Caution here]\n\n2. Main Answer (based on tool results & Display Order)\n   - US FDA Warnings (List explicitly).\n   - Taiwan KingNet Data (List ingredients and indications).\n\n3. Data Source Attribution & Disclaimer (ALWAYS append):\n   [If User asks in Chinese]:\n   ***\n   本資訊綜合 MedQuAD 知識庫與 🇺🇸 美國 FDA / 🇹🇼 台灣藥品資料庫之即時查詢結果。\n   （資料來源：美國食品藥物管理局 openFDA 專案。請注意：請勿依賴 openFDA 做出醫療決策。請務必向您的醫療保健提供者諮詢受 FDA 監管產品的風險與益處。）\n   ⚠️ 免責聲明：本對話內容由 Medi-Agent AI 系統生成，僅供衛教資訊參考，不代表專業醫療診斷。\n   🏥 就醫建議：若出現緊急狀況，請立即前往鄰近急診尋求協助。\n   我是 AI 助理。如需專業諮詢，請聯繫：Nobel 醫師，Dev - XXX專科醫師\n   Nobel: 0912003608\n\n   [If User asks in English]:\n   ***\n   This information combines results from MedQuAD, 🇺🇸 US FDA, and 🇹🇼 Taiwan databases.\n   (Source: US FDA openFDA project. Note: Do not rely on openFDA to make clinical decisions. Always consult your healthcare provider regarding the risks and benefits of FDA-regulated products.)\n   ⚠️ Disclaimer: This conversation is generated by Medi-Agent AI for educational purposes only and does not represent professional medical diagnosis.\n   🏥 Medical Advice: In case of an emergency, please seek immediate assistance at the nearest emergency room.\n   I am an AI assistant. For professional consultation, contact: Dr. Nobel, Dev - XXX Specialist\n   Nobel: 0912003608\n\n═══════════════════════════════════════════════════════════\n🚫 CRITICAL RESTRICTIONS:\n═══════════════════════════════════════════════════════════\n1. NEVER provide personal contact information beyond what's specified above.\n2. NEVER diagnose conditions definitively.\n3. NEVER fabricate information if tools return empty results.\n4. DO NOT output Chinese characters if the user asks in English.\n\n═══════════════════════════════════════════════════════════\n🔍 EMPTY RESULT HANDLING (Strictly Bilingual):\n═══════════════════════════════════════════════════════════\nIf MedQuAD returns no results:\n[If User asks in Chinese]:\n→ \"我在 MedQuAD 資料庫中無法找到關於「{query}」的相關資訊。建議您：1. 換個方式描述您的問題 2. 或直接聯繫 Nobel 醫師進行專業諮詢\"\n[If User asks in English]:\n→ \"I could not find information about '{query}' in the MedQuAD database. I suggest you: 1. Rephrase your question, or 2. Contact Dr. Nobel for professional consultation.\"\n\nIf Taiwan DB (lookup_taiwan_drug) returns empty result:\n[If User asks in Chinese]:\n→ \"在台灣 KingNet 藥典中目前無法找到「{drug_name}」的在地成分紀錄。\" (Do NOT fabricate ingredients).\n[If User asks in English]:\n→ \"Currently, no local ingredient records for '{drug_name}' can be found in the Taiwan KingNet Pharmacopeia.\"\n\nIf drug tools return no results (but NOT \"no interaction\"):\n[If User asks in Chinese]:\n→ \"目前資料庫中無此藥物的詳細資訊，建議諮詢藥師或醫師。\"\n[If User asks in English]:\n→ \"There is currently no detailed information for this medication in the database. It is recommended to consult a pharmacist or doctor.\"\n\n═══════════════════════════════════════════════════════════\n✅ VERIFICATION CHECKLIST (Self-check before responding):\n═══════════════════════════════════════════════════════════\nBefore sending any response, verify:\n☑ Did I call the appropriate tool(s)?\n☑ Did I wait for tool results?\n☑ Is my answer based ONLY on tool results?\n☑ Are Drug Warnings placed at the VERY TOP of the response?\n☑ Did I explicitly specify WHICH drug pair is dangerous if checking >2 drugs?\n☑ Did I include all mandatory footers (including the openFDA disclaimer)?\n☑ Does the response language STRICTLY MATCH the user's input language? (No Chinese if asked in English)\n☑ Is the tone friendly and accessible?\n\nIf any box is unchecked → DO NOT RESPOND, fix the issue or call tools first.\n═══════════════════════════════════════════════════════════\nEND OF SYSTEM PROTOCOL\n═══════════════════════════════════════════════════════════",
+          "maxIterations": 5,
+          "returnIntermediateSteps": true
+        }
+      },
+      "id": "10a5b513-a70c-4046-b6a5-2ef3d6bf9aab",
+      "name": "醫療 AI 助理1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.9,
+      "position": [
+        752,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        480,
+        896
+      ],
+      "id": "3102d702-4d07-406f-a43d-7a054591970b",
+      "name": "Gemini 主要 LLM1",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "rHnlFwvSYJXymtf4",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "id": "a52fb1d8-a251-4b9e-a322-a827f93194fd",
+      "name": "對話記憶1",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        688,
+        912
+      ]
+    },
+    {
+      "parameters": {
+        "name": "MedQuAD",
+        "description": "🔴 MANDATORY TOOL - You MUST use this tool for ALL medical questions about symptoms, diseases, treatments, anatomy, health conditions. This tool searches the MedQuAD medical database. NEVER answer medical questions without calling this tool first. Even if you think you know the answer, you MUST call this tool. Returns medical information from NIH trusted sources.",
+        "topK": 20
+      },
+      "id": "d33faa3f-25a3-433a-8354-23b20635bdae",
+      "name": "醫療知識向量工具1",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        928
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-embedding-001"
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        848,
+        1312
+      ],
+      "id": "385445d3-f12b-40b1-8b50-865814610eaa",
+      "name": "Gemini 嵌入模型1",
+      "retryOnFail": false,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "rHnlFwvSYJXymtf4",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-3-flash-preview",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        1136
+      ],
+      "id": "df3a03ab-1394-4a0a-b5a1-cedae0f833cf",
+      "name": "Gemini 向量查詢 LLM1",
+      "retryOnFail": false,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "rHnlFwvSYJXymtf4",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 取得 AI 的輸出結果或錯誤資訊\nconst inputData = $input.first().json;\nconst replyToken = $('格式化訊息資料1').first().json.replyToken;\nconst startTime = $('格式化訊息資料1').first().json.startTime; \n\n// --- 0. 計算延遲 ---\nconst endTime = Date.now();\nconst latencyMs = startTime ? (endTime - startTime) : 0;\n\n// ✨ 1. 攔截錯誤並設計「雙軌訊息」\nlet aiResponse = \"\";\nlet lineMessage = \"\"; // 新增：專門給 LINE 使用者的友善訊息\nlet isError = false;\n\nif (inputData.error) {\n    // 發生 503 等 API 崩潰時\n    aiResponse = \"API 呼叫失敗: \" + inputData.error.message; // 👉 寫入 Google Sheets 的真實錯誤\n    lineMessage = \"👨‍⚕️ 系統目前查閱資料較為繁忙，請您稍後再試一次！\"; // 👉 傳給使用者的安撫訊息\n    isError = true;\n} else {\n    // 正常運作時\n    aiResponse = inputData.output || \"\";\n    lineMessage = aiResponse; // 正常時兩者相同\n}\n\n// --- 2. 判定使用的工具 ---\nlet toolUsed = \"None\"; \nif (inputData.intermediateSteps && inputData.intermediateSteps.length > 0) {\n  const allTools = inputData.intermediateSteps.map(step => step.action.tool);\n  const uniqueTools = [...new Set(allTools)];\n  toolUsed = uniqueTools.join(\", \");\n}\n\n// --- 3. 提取警示層級 ---\nlet warningLevel = \"🔵 注意 (Caution)\"; \nif (isError) {\n    warningLevel = \"⚫ 系統錯誤 (503 Error)\"; \n} else if (aiResponse.includes(\"🔴\")) {\n    warningLevel = \"🔴 危險 (High Risk)\";\n} else if (aiResponse.includes(\"🟡\")) {\n    warningLevel = \"🟡 警告 (Warning)\";\n} else if (aiResponse.includes(\"🔵\")) {\n    warningLevel = \"🔵 注意 (Caution)\";\n}\n\n// --- 4. 提取模型版本 ---\nconst modelVersion = \"Gemini 3 Flash preview (Full Hybrid)\"; \n\n// --- 5. 清理回應文字 ---\nlet responseText = aiResponse.replace(/\\\\n/g, '\\n').replace(/\"/g, \"'\");\nlet finalLineMessage = lineMessage.replace(/\\\\n/g, '\\n').replace(/\"/g, \"'\");\n\n// 回傳結果\nreturn {\n  replyToken: replyToken,\n  responseText: responseText,     // 👈 記錄真實錯誤\n  lineMessage: finalLineMessage, // 👈 新增欄位，供 LINE 節點傳送友善訊息\n  toolUsed: toolUsed, \n  warningLevel: warningLevel, \n  modelVersion: modelVersion, \n  timestamp: new Date().toISOString(),\n  latencyMs: latencyMs \n};"
+      },
+      "id": "1da751c9-5163-4499-b6e7-94cb1a2641fd",
+      "name": "格式化 LINE 回應1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        688
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $json.replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: $json.lineMessage\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "fec5c455-02de-4163-8c25-5acfe5ca2938",
+      "name": "發送 LINE 回覆1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1248,
+        688
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $('LINE Webhook 觸發器1').item.json.body.events[0].replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: '您好！我是AI醫療助理，目前只能處理文字訊息。請用文字描述您的問題，我會盡力協助您！'\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "8fe6c668-8059-4b49-a519-a6dfec810bbe",
+      "name": "處理非文字訊息1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -64,
+        624
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-start-message",
+              "operator": {
+                "name": "filter.operator.equals",
+                "type": "string",
+                "operation": "equals"
+              },
+              "leftValue": "={{ $json.body.events[0].message.text }}",
+              "rightValue": "開始診療"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6e98819e-b984-4ea1-abc7-65e4f5e659e2",
+      "name": "檢查開始診療1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -224,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-user-profile-format",
+              "operator": {
+                "name": "filter.operator.regex",
+                "type": "string",
+                "operation": "regex"
+              },
+              "leftValue": "={{ $json.body.events[0].message.text }}",
+              "rightValue": "^姓名：\\s*(.+?)\\s+身高：\\s*(.+?)\\s+體重：\\s*(.+?)\\s+年齡：\\s*(.+?)\\s*$"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "63d5179a-b112-44c9-8355-222a9722d670",
+      "name": "檢查資料格式1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        288
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 提取 LINE 訊息資訊\nconst lineEvent = $input.first().json.body.events[0];\nconst userMessage = lineEvent.message.text.trim(); // 加入 trim()\nconst userId = lineEvent.source.userId;\nconst replyToken = lineEvent.replyToken;\n\n// 改善正規表達式，允許更靈活的空白符號\nconst regex = /^姓名：\\s*(.+?)\\s+身高：\\s*(.+?)\\s+體重：\\s*(.+?)\\s+年齡：\\s*(.+?)\\s*$/;\nconst matches = userMessage.match(regex);\n\nif (matches) {\n  const name = matches[1].trim();\n  const height = matches[2].trim();\n  const weight = matches[3].trim();\n  const age = matches[4].trim();\n  \n  // 驗證資料不為空\n  if (name && height && weight && age) {\n    return {\n      userId: userId,\n      name: name,\n      height: height,\n      weight: weight,\n      age: age,\n      timestamp: new Date().toISOString(),\n      replyToken: replyToken,\n      dataType: 'profile',\n      isValid: true\n    };\n  } else {\n    return {\n      userId: userId,\n      replyToken: replyToken,\n      isValid: false,\n      error: '資料格式正確但內容不完整'\n    };\n  }\n} else {\n  return {\n    userId: userId,\n    replyToken: replyToken,\n    isValid: false,\n    error: '資料格式不正確'\n  };\n}"
+      },
+      "id": "be6b8e53-33e2-4198-bce0-b5a0c2d57e68",
+      "name": "解析使用者資料1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 擷取原始的 LINE Webhook 資料\nconst lineEvent = $input.first().json.body.events[0];\nconst userMessage = lineEvent.message.text.trim(); // 加入 trim()\nconst userId = lineEvent.source.userId;\nconst replyToken = lineEvent.replyToken;\n\n// 改善正規表達式\nconst regex = /^評價：\\s*([1-5])\\s*星\\s*$/;\nconst matches = userMessage.match(regex);\n\nif (matches) {\n  const rating = matches[1].trim();\n  \n  return {\n    userId: userId,\n    rating: rating,\n    timestamp: new Date().toISOString(),\n    replyToken: replyToken,\n    dataType: 'rating',\n    isValid: true\n  };\n} else {\n  return {\n    userId: userId,\n    replyToken: replyToken,\n    isValid: false,\n    error: '評價格式不正確'\n  };\n}"
+      },
+      "id": "b7af973b-b26b-4cbf-bbcf-f38ffefa1a2d",
+      "name": "解析使用者評價1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-rating-format",
+              "operator": {
+                "name": "filter.operator.regex",
+                "type": "string",
+                "operation": "regex"
+              },
+              "leftValue": "={{ $json.body.events[0].message.text }}",
+              "rightValue": "^評價：\\s*[1-5]\\s*星\\s*$"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5e87a723-3750-4af8-b076-3524c1aa6802",
+      "name": "檢查評價格式1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        192,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-success",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.success }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f6aae9e8-286f-4629-95f2-fd15e9248a4c",
+      "name": "檢查處理結果1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1488,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "check-profile-type",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.currentData.dataType }}",
+              "rightValue": "profile"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "0fbd0277-8bba-46aa-b5b8-581c6c014630",
+      "name": "檢查資料類型2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $json.currentData.replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: '✅ 您的資料已建立/更新，現在可以開始進行醫療諮詢了！'\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "7ff51774-3af9-4435-bcae-40e4984cfced",
+      "name": "發送資料確認回覆1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        128
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $json.currentData.replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: '⭐ 感謝您的評價！'\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "9fd0d06c-8656-4c81-85f0-7c56df3dc395",
+      "name": "發送評價確認回覆1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2016,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $json.replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: '❌ ' + $json.message + '\\n\\n請檢查格式是否正確：\\n\\n個人資料範例：\\n姓名：黃子瑜 身高：181 體重：55 年齡：25\\n\\n評價範例：\\n評價：5星'\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "c4b8f0a5-2f45-4e32-b0d8-d27d89192585",
+      "name": "發送錯誤回應1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        496
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n\treplyToken: $('LINE Webhook 觸發器1').item.json.body.events[0].replyToken,\n\tmessages: [\n\t\t{\n\t\t\ttype: 'text',\n\t\t\ttext: '好的，請先提供您的基本資料。\\n\\n範例：\\n姓名：黃子瑜 身高：181 體重：55 年齡：25\\n\\n請務必使用此格式，並以半形空格分隔。\\n完成後就可以開始進行醫療諮詢了。\\n\\n此外，若您希望對本次諮詢服務進行評價，請使用以下格式：\\n評價：[1-5]星\\n\\n範例：\\n評價：5星'\n\t\t}\n\t]\n}) }}",
+        "options": {}
+      },
+      "id": "5df9cfcb-a309-498a-bc2e-426247c7bc61",
+      "name": "傳送輸入範例1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -32,
+        -16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "9rzypCUw1tg1TCJ2",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0",
+          "mode": "list",
+          "cachedResultName": "LineBot_Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "userinfo",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "userId": "={{ $json.userId }}",
+            "name": "={{ $json.name }}",
+            "height": "={{ $json.height }}",
+            "weight": "={{ $json.weight }}",
+            "age": "={{ $json.age }}",
+            "timestamp": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [
+            "userId"
+          ],
+          "schema": [
+            {
+              "id": "userId",
+              "displayName": "userId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "height",
+              "displayName": "height",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "weight",
+              "displayName": "weight",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "age",
+              "displayName": "age",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rating",
+              "displayName": "rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f8209c40-110c-4bee-9ac5-0faa86854081",
+      "name": "Google Sheets (更新個人資料)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        176
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "sQ2Fckunp9M4SobT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0",
+          "mode": "list",
+          "cachedResultName": "LineBot_Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "userinfo",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "userId": "={{ $json.userId }}",
+            "rating": "={{ $json.rating }}",
+            "timestamp": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [
+            "userId"
+          ],
+          "schema": [
+            {
+              "id": "userId",
+              "displayName": "userId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "height",
+              "displayName": "height",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "weight",
+              "displayName": "weight",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "age",
+              "displayName": "age",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "rating",
+              "displayName": "rating",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "080d4968-0d74-4c88-a23c-c675e1ecd869",
+      "name": "Google Sheets (更新評價)",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        720,
+        448
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "sQ2Fckunp9M4SobT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 接收 Google Sheets 的執行結果\nconst inputData = $input.first().json;\n\n// 我們需要還原一些原始資料 (dataType, replyToken)，\n// 因為 Google Sheets 節點只會回傳寫入的欄位。\n// 這些資料存在於前一個節點 (解析使用者資料1 或 解析使用者評價1) 的輸入中。\n\nlet originalData = {};\nlet dataType = '';\n\ntry {\n  // 嘗試從「解析使用者資料1」獲取 context (如果是個人資料路徑)\n  const profileNode = $('解析使用者資料1');\n  if (profileNode && profileNode.first()) {\n    originalData = profileNode.first().json;\n    dataType = 'profile';\n  }\n} catch(e) {}\n\nif (!dataType) {\n  try {\n    // 嘗試從「解析使用者評價1」獲取 context (如果是評價路徑)\n    const ratingNode = $('解析使用者評價1');\n    if (ratingNode && ratingNode.first()) {\n       originalData = ratingNode.first().json;\n       dataType = 'rating';\n    }\n  } catch(e) {}\n}\n\n// 確保我們有 replyToken\nconst replyToken = originalData.replyToken || '';\n\nreturn {\n  success: true,\n  currentData: {\n    ...inputData, // 包含 userId, name, etc.\n    dataType: dataType, \n    replyToken: replyToken\n  }\n};\n"
+      },
+      "id": "1e5ce073-169e-4438-a785-68fe697df277",
+      "name": "整合處理結果",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1088,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0",
+          "mode": "list",
+          "cachedResultName": "LineBot_Data",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 49114892,
+          "mode": "list",
+          "cachedResultName": "final experiment_logs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sBsIsk8YLhccmHzSE0_hECoUc0yN8xJB2Wegcp_Hca0/edit#gid=49114892"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "userId": "={{ $('格式化訊息資料1').first().json.sessionId }}",
+            "question": "={{ $('格式化訊息資料1').first().json.chatInput }}",
+            "ai_response": "={{ $('格式化 LINE 回應1').first().json.responseText }}",
+            "timestamp": "={{ $('格式化 LINE 回應1').first().json.timestamp }}",
+            "tool_used": "={{ $('格式化 LINE 回應1').first().json.toolUsed }}",
+            "warning_level": "={{ $('格式化 LINE 回應1').first().json.warningLevel }}",
+            "model_version": "={{ $('格式化 LINE 回應1').first().json.modelVersion }}",
+            "latency_ms": "={{ $('格式化 LINE 回應1').first().json.latencyMs }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "userId",
+              "displayName": "userId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "question",
+              "displayName": "question",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "ai_response",
+              "displayName": "ai_response",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tool_used",
+              "displayName": "tool_used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "warning_level",
+              "displayName": "warning_level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "latency_ms",
+              "displayName": "latency_ms",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "model_version",
+              "displayName": "model_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1440,
+        688
+      ],
+      "id": "0ff7b601-8612-4e0b-9fb4-d19439efd912",
+      "name": "Google Sheets (記錄實驗數據)",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "sQ2Fckunp9M4SobT",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://localhost:3001/sse",
+        "serverTransport": "sse",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [
+        816,
+        912
+      ],
+      "id": "c88a9a1f-095a-49bf-9b00-787f22170d0a",
+      "name": "MCP Client"
+    },
+    {
+      "parameters": {
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "medquad-gemini-embedding-001",
+          "mode": "list",
+          "cachedResultName": "medquad-gemini-embedding-001"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        944,
+        1136
+      ],
+      "id": "6f62290e-bb62-427f-89de-c7ffa8a2da15",
+      "name": "Pinecone 向量資料庫1",
+      "credentials": {
+        "pineconeApi": {
+          "id": "t95cH8ADxvRxhPGm",
+          "name": "PineconeApi account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "LINE Webhook 觸發器1": {
+      "main": [
+        [
+          {
+            "node": "過濾文字訊息1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "過濾文字訊息1": {
+      "main": [
+        [
+          {
+            "node": "檢查開始診療1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "處理非文字訊息1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "格式化訊息資料1": {
+      "main": [
+        [
+          {
+            "node": "醫療 AI 助理1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "醫療 AI 助理1": {
+      "main": [
+        [
+          {
+            "node": "格式化 LINE 回應1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 主要 LLM1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "醫療 AI 助理1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "對話記憶1": {
+      "ai_memory": [
+        [
+          {
+            "node": "醫療 AI 助理1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "醫療知識向量工具1": {
+      "ai_tool": [
+        [
+          {
+            "node": "醫療 AI 助理1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 嵌入模型1": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone 向量資料庫1",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini 向量查詢 LLM1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "醫療知識向量工具1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "格式化 LINE 回應1": {
+      "main": [
+        [
+          {
+            "node": "發送 LINE 回覆1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "發送 LINE 回覆1": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets (記錄實驗數據)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查開始診療1": {
+      "main": [
+        [
+          {
+            "node": "傳送輸入範例1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "檢查資料格式1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查資料格式1": {
+      "main": [
+        [
+          {
+            "node": "解析使用者資料1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "檢查評價格式1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析使用者資料1": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets (更新個人資料)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "解析使用者評價1": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets (更新評價)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查評價格式1": {
+      "main": [
+        [
+          {
+            "node": "解析使用者評價1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "格式化訊息資料1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查處理結果1": {
+      "main": [
+        [
+          {
+            "node": "檢查資料類型2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "發送錯誤回應1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "檢查資料類型2": {
+      "main": [
+        [
+          {
+            "node": "發送資料確認回覆1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "發送評價確認回覆1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets (更新個人資料)": {
+      "main": [
+        [
+          {
+            "node": "整合處理結果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets (更新評價)": {
+      "main": [
+        [
+          {
+            "node": "整合處理結果",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "整合處理結果": {
+      "main": [
+        [
+          {
+            "node": "檢查處理結果1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MCP Client": {
+      "ai_tool": [
+        [
+          {
+            "node": "醫療 AI 助理1",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pinecone 向量資料庫1": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "醫療知識向量工具1",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "827a54782146e61f640e7fddbdf4eba2a28caa7c9ccf72c6d53438329d6e8169"
+  }
+}

@@ -1,0 +1,24 @@
+{
+    "name":  "drug-interaction-mcp",
+    "version":  "1.0.0",
+    "description":  "Integrated MCP Server for NIH and Taiwan Drug Lookup",
+    "main":  "index.js",
+    "type":  "module",
+    "scripts":  {
+                    "start":  "node index.js",
+                    "test":  "echo \"Error: no test specified\" \u0026\u0026 exit 1"
+                },
+    "keywords":  [
+
+                 ],
+    "author":  "",
+    "license":  "ISC",
+    "dependencies":  {
+                         "@modelcontextprotocol/sdk":  "^1.0.1",
+                         "axios":  "^1.7.0",
+                         "cheerio":  "^1.0.0",
+                         "cors":  "^2.8.5",
+                         "express":  "^4.21.0",
+                         "puppeteer":  "^24.43.1"
+                     }
+}
